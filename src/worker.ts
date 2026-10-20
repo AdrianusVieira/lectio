@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 import { cachedDocument, storeDocument } from './lib/cache';
 import { extractPdf } from './lib/pdf';
-import { latexToText, markdownToText, parseBib, splitSentences, extractDefinitions } from './lib/extract';
+import { expandLatexIncludes, latexToText, markdownToText, parseBib, splitSentences, extractDefinitions } from './lib/extract';
 import type { DocumentData, FileEntry } from './lib/types';
 
 type Message = { entries: FileEntry[] };
@@ -39,7 +39,7 @@ scope.onmessage = async (event: MessageEvent<Message>) => {
         let pages: string[] | undefined;
         let displaySource: string | undefined;
         if (entry.kind === 'pdf') { pages = await extractPdf(entry.file); text = pages.join('\n\n'); }
-        else if (entry.kind === 'tex') { displaySource = raw.get(entry.path) || ''; text = latexToText(displaySource, bib, labels); }
+        else if (entry.kind === 'tex') { displaySource = raw.get(entry.path) || ''; text = latexToText(expandLatexIncludes(displaySource, entry.path, raw), bib, labels); }
         else if (entry.kind === 'md') { displaySource = await entry.file.text(); text = markdownToText(displaySource); }
         else text = await entry.file.text();
         doc = { path: entry.path, name: entry.file.name, kind: entry.kind, text, pages,
@@ -54,15 +54,7 @@ scope.onmessage = async (event: MessageEvent<Message>) => {
       const stem = pdf.path.replace(/\.pdf$/i, '');
       const source = docs.find(d => d.kind === 'tex' && d.path.replace(/\.tex$/i, '') === stem);
       if (!source) continue;
-      const root = raw.get(source.path) || '';
-      const directory = source.path.slice(0, source.path.lastIndexOf('/') + 1);
-      const chunks = [source.text];
-      for (const match of root.matchAll(/\\(?:include|input)\{([^}]+)\}/g)) {
-        const target = `${directory}${match[1].replace(/\.tex$/i, '')}.tex`;
-        const included = docs.find(d => d.path === target);
-        if (included) chunks.push(included.text);
-      }
-      pdf.text = chunks.join('\n\n');
+      pdf.text = source.text;
       pdf.sentences = splitSentences(pdf.text);
       pdf.sourcePath = source.path;
     }

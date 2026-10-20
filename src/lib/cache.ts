@@ -1,6 +1,6 @@
 import type { DocumentData } from './types';
 
-const DB = 'lectio-documents-v1';
+const DB = 'lectio-documents-v2';
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {

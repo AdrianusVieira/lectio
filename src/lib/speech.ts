@@ -41,11 +41,19 @@ export class SpeechReader {
     const generation = this.generation;
     const advance = () => {
       if (generation !== this.generation || !this.doc || !this.settings) return;
-      const sentence = this.doc.sentences[this.index];
+      let sentence = this.doc.sentences[this.index];
+      let spoken = '';
+      while (sentence) {
+        if (!this.shouldSkip(sentence.text)) {
+          spoken = normalizeForSpeech(sentence.text, { definitions: this.settings.definitions, overrides: this.settings.overrides, firstUse: this.firstUse });
+          if (/[\p{L}\d]/u.test(spoken)) break;
+        }
+        this.index++;
+        sentence = this.doc.sentences[this.index];
+      }
       if (!sentence) { this.speaking = false; this.onState?.(); return; }
-      if (this.shouldSkip(sentence.text)) { this.index++; advance(); return; }
       this.onPosition?.(this.index);
-      const utterance = new SpeechSynthesisUtterance(normalizeForSpeech(sentence.text, { definitions: this.settings.definitions, overrides: this.settings.overrides, firstUse: this.firstUse }));
+      const utterance = new SpeechSynthesisUtterance(spoken);
       utterance.lang = 'pt-BR'; utterance.voice = this.settings.voice || null;
       utterance.rate = this.settings.rate; utterance.pitch = this.settings.pitch;
       utterance.onboundary = event => {

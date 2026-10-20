@@ -17,13 +17,41 @@ export function parseBib(text: string): Record<string, string> {
     const author = match[2].match(/author\s*=\s*[\{"]([^}"]+)/i)?.[1];
     const year = match[2].match(/year\s*=\s*[\{"]?(\d{4})/i)?.[1];
     const title = match[2].match(/title\s*=\s*[\{"]([^}"]+)/i)?.[1];
-    records[match[1].trim()] = [author?.split(/\s+and\s+/i).map(a => a.split(',')[0]).join(' e '), year, title].filter(Boolean).join(', ');
+    const names = author?.replace(/[{}]/g, '').split(/\s+and\s+/i).map(a => a.split(',')[0]).join(' e ');
+    records[match[1].trim()] = [names || title?.replace(/[{}]/g, ''), year].filter(Boolean).join(', ');
   }
   return records;
 }
 
+function stripLatexComments(source: string): string {
+  return source.replace(/(^|[^\\])%[^\n]*/gm, '$1');
+}
+
+export function expandLatexIncludes(source: string, path: string, files: Map<string, string>, visited = new Set<string>([path])): string {
+  const directory = path.slice(0, path.lastIndexOf('/') + 1);
+  return stripLatexComments(source).replace(/\\(?:include|input)\{([^}]+)\}/g, (command, target: string) => {
+    const parts = `${directory}${target.replace(/\.tex$/i, '')}.tex`.split('/');
+    const normalized: string[] = [];
+    for (const part of parts) {
+      if (part === '..') normalized.pop();
+      else if (part && part !== '.') normalized.push(part);
+    }
+    const resolved = normalized.join('/');
+    const included = files.get(resolved);
+    if (included === undefined || visited.has(resolved)) return '';
+    return expandLatexIncludes(included, resolved, files, new Set([...visited, resolved]));
+  });
+}
+
 export function latexToText(source: string, bib: Record<string, string> = {}, labels: Record<string, string> = {}): string {
-  let text = source.replace(/(^|[^\\])%[^\n]*/gm, '$1');
+  // A root .tex includes setup code before \begin{document}; that is never prose.
+  const uncommented = stripLatexComments(source);
+  const documentStart = uncommented.indexOf('\\begin{document}');
+  let text = documentStart < 0 ? uncommented : uncommented.slice(documentStart + '\\begin{document}'.length).split('\\end{document}')[0];
+  text = text.replace(/\\begin\{(?:tikzpicture|lstlisting|verbatim|minted)\}(?:\[[^\]]*\])?[\s\S]*?\\end\{(?:tikzpicture|lstlisting|verbatim|minted)\}/g, '\n');
+  text = text.replace(/\\SI\{([^{}]+)\}\{([^{}]+)\}/g, '$1 $2').replace(/\\(?:si|num)\{([^{}]+)\}/g, '$1');
+  text = text.replace(/\\(?:newcommand|renewcommand|providecommand|addcontentsline|markboth)(?:\[[^\]]*\])?(?:\{(?:[^{}]|\{[^{}]*\})*\}){1,3}/g, '');
+  text = text.replace(/\\(?:setcounter|pagenumbering|pagestyle|thispagestyle|setlength|addtolength|vspace|hspace)(?:\[[^\]]*\])?(?:\{[^{}]*\}){1,2}/g, '');
   const ownLabels: Record<string, string> = { ...labels };
   let lastHeading = '';
   text = text.replace(/\\(?:chapter|section|subsection|subsubsection)\*?(?:\[[^\]]*\])?\{([^{}]*)\}/g, (_, title: string) => { lastHeading = title; return `\n\n${title}\n\n`; });
@@ -35,11 +63,12 @@ export function latexToText(source: string, bib: Record<string, string> = {}, la
   text = text.replace(/\\(alpha|beta|gamma|delta|theta|lambda|mu|pi|sigma|tau|omega)\b/gi, '$1');
   text = text.replace(/\\(?:leq|le)\b/g, ' menor ou igual a ').replace(/\\(?:geq|ge)\b/g, ' maior ou igual a ').replace(/\\neq\b/g, ' diferente de ');
   text = text.replace(/\\begin\{(?:equation\*?|align\*?|displaymath)\}|\\end\{(?:equation\*?|align\*?|displaymath)\}|\$\$/g, '\n');
-  text = text.replace(/\\(?:begin|end)\{[^}]+\}/g, '\n');
+  text = text.replace(/\\begin\{[^}]+\}(?:\[[^\]]*\])?|\\end\{[^}]+\}/g, '\n');
   text = text.replace(/\\(?:includegraphics|bibliography|bibliographystyle|input|include|usepackage|documentclass)(?:\[[^\]]*\])?\{[^}]*\}/g, '');
   text = text.replace(/\\(?:textbf|textit|emph|underline|mathrm|mathbf|texttt|caption|footnote|url)\{([^{}]*)\}/g, '$1');
-  text = text.replace(/\\(?:item)\b/g, '\n• ').replace(/\\(?:par|newline|\\)\b/g, '\n');
+  text = text.replace(/\\(?:item)\b/g, '\n• ').replace(/\\(?:par|newline)\b|\\\\(?:\[[^\]]*\])?/g, '\n');
   text = text.replace(/\\[,;:!]|\\(?:quad|qquad|enspace|thinspace)\b/g, ' ');
+  text = text.replace(/\\%/g, '%').replace(/\\[~ ]/g, ' ');
   text = text.replace(/\\[a-zA-Z@]+\*?(?:\[[^\]]*\])?/g, '');
   text = text.replace(/[{}$]/g, '').replace(/~/g, ' ').replace(/&/g, ' ');
   return text.replace(/[ \t]+/g, ' ').replace(/\n[ \t]+/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
@@ -48,7 +77,8 @@ export function latexToText(source: string, bib: Record<string, string> = {}, la
 export function markdownToText(source: string): string {
   return source.replace(/^---\n[\s\S]*?\n---\n/, '').replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/^#{1,6}\s*/gm, '')
-    .replace(/```[\s\S]*?```/g, '').replace(/[*_`>#]/g, '').trim();
+    .replace(/```[\s\S]*?```/g, '').replace(/^\s*\|?\s*:?-{3,}:?(?:\s*\|\s*:?-{3,}:?)*\s*\|?\s*$/gm, '')
+    .replace(/^\s*[-*_]{3,}\s*$/gm, '').replace(/[*_`>#]/g, '').trim();
 }
 
 // Schwartz & Hearst: align the short form's characters backwards to a long form.

@@ -3,7 +3,7 @@ import type { Pronunciation } from './types';
 
 export const defaultRules = rules;
 const escaped = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const unitsPattern = new RegExp(`\\b(\\d+(?:[.,]\\d+)?)\\s*(${Object.keys(rules.units).sort((a, b) => b.length - a.length).map(escaped).join('|')})\\b`, 'gi');
+const unitsPattern = new RegExp(`\\b(\\d+(?:[.,]\\d+)?)\\s*(${Object.keys(rules.units).sort((a, b) => b.length - a.length).map(escaped).join('|')})\\b`, 'g');
 const symbolsPattern = new RegExp(Object.keys(rules.symbols).sort((a, b) => b.length - a.length).map(escaped).join('|'), 'g');
 const ones = ['', 'um', 'dois', 'três', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove'];
 const teens = ['dez', 'onze', 'doze', 'treze', 'quatorze', 'quinze', 'dezesseis', 'dezessete', 'dezoito', 'dezenove'];
@@ -24,7 +24,7 @@ export function integerWords(n: number): string {
 }
 
 function spell(term: string): string {
-  return [...term].map(char => /\d/.test(char) ? integerWords(Number(char)) : char === '-' ? 'hífen' : char === '/' ? 'barra' : char).join(' ');
+  return term.split('/').map(part => [...part].map(char => /\d/.test(char) ? integerWords(Number(char)) : char === '-' ? 'hífen' : char).join(' ')).join(' e ');
 }
 
 export interface NormalizeOptions { definitions?: Record<string, string>; overrides?: Record<string, Pronunciation>; firstUse?: Set<string>; }
@@ -34,13 +34,18 @@ export function normalizeForSpeech(input: string, options: NormalizeOptions = {}
   let text = input.normalize('NFC').replace(/\s+/g, ' ').trim();
   const protectedParts: string[] = [];
   const protect = (value: string) => { const index = protectedParts.push(value) - 1; return `\uE000${String.fromCharCode(0xE100 + index)}\uE001`; };
+  text = text.replace(/(?:\.{1,2}[\\/]|[A-Za-z]:[\\/])(?:[^\\/\s]+[\\/])*([^\\/\s),;]+)[\\/]?/g, (_, folder: string) => protect(`pasta ${folder}`));
+  text = text.replace(/\b[\p{L}\d_.-]+\.(?:pdf|tex|bib|md|txt)\b/giu, () => protect('arquivo'));
   // Dates must precede fractions and number sequences.
   text = text.replace(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/g, (_, d: string, m: string, y: string) => protect(`${integerWords(+d)} de ${['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'][+m - 1] || m} de ${integerWords(+y)}`));
+  text = text.replace(/\b(\d{2})\/(\d{2})\b/g, (match, d: string, m: string) => +d >= 1 && +d <= 31 && +m >= 1 && +m <= 12 ? protect(`${integerWords(+d)} de ${['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'][+m - 1]}`) : match);
   text = text.replace(/\b(?:NR[- ]?\d+,?\s*)?item\s+(\d+(?:\.\d+)+)(?:\s+([a-z]))?/gi, (all, seq: string, letter?: string) => {
     const prefix = /^NR/i.test(all) ? `norma regulamentadora ${integerWords(Number((all.match(/NR[- ]?(\d+)/i) || [])[1]))}, ` : '';
     return protect(`${prefix}item ${seq.split('.').map(integerPart => integerWords(+integerPart)).join(' ponto ')}${letter ? `, alínea ${letter}` : ''}`);
   });
   text = text.replace(/\bCap\.\s*(\d+)\s*[–-]\s*(\d+)/gi, (_, a: string, b: string) => protect(`capítulos ${integerWords(+a)} a ${integerWords(+b)}`));
+  text = text.replace(/\bNR[- ]?(\d+)\b/gi, (_, n: string) => protect(`norma regulamentadora ${integerWords(+n)}`));
+  text = text.replace(/\b(\d+)\s*\/\s*(\d+)\b/g, (_, a: string, b: string) => protect(`${integerWords(+a)} sobre ${integerWords(+b)}`));
   text = text.replace(/~\s*(\d[\d.,]*)/g, (_, n: string) => `aproximadamente ${n}`);
   const ordinalMasculine = ['', 'primeiro', 'segundo', 'terceiro', 'quarto', 'quinto', 'sexto', 'sétimo', 'oitavo', 'nono', 'décimo'];
   const ordinalFeminine = ['', 'primeira', 'segunda', 'terceira', 'quarta', 'quinta', 'sexta', 'sétima', 'oitava', 'nona', 'décima'];
@@ -48,8 +53,7 @@ export function normalizeForSpeech(input: string, options: NormalizeOptions = {}
   text = text.replace(/\b(\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d+(?:,\d+)?)\s*%/g, (_, n: string) => protect(`${numberWords(n)} por cento`));
   text = text.replace(/\b(\d+)\s*[–-]\s*(\d+)\b/g, (_, a: string, b: string) => protect(`${integerWords(+a)} a ${integerWords(+b)}`));
   text = text.replace(unitsPattern, (_, n: string, unit: string) => {
-    const key = Object.keys(rules.units).find(k => k.toLowerCase() === unit.toLowerCase()) as keyof typeof rules.units | undefined;
-    return protect(`${numberWords(n)} ${key ? rules.units[key] : unit}`);
+    return protect(`${numberWords(n)} ${rules.units[unit as keyof typeof rules.units]}`);
   });
   text = text.replace(/\b\d{1,3}(?:\.\d{3})+(?:,\d+)?\b|\b\d+(?:,\d+)?\b/g, n => numberWords(n));
   text = text.replace(symbolsPattern, symbol => rules.symbols[symbol as keyof typeof rules.symbols] || symbol);
@@ -69,6 +73,7 @@ export function normalizeForSpeech(input: string, options: NormalizeOptions = {}
     }
     return protect(mode === 'spell' ? spell(term) : term.toLowerCase());
   });
+  text = text.replace(/[\\/]/g, ' e ').replace(/[•|#*_{}\[\]]/g, ' ').replace(/\.{2,}/g, ' ').replace(/\s+--+\s+/g, ', ').replace(/\s*[—–]\s*/g, ', ');
   return text.replace(/\uE000([\uE100-\uF8FF])\uE001/g, (_, marker: string) => protectedParts[marker.charCodeAt(0) - 0xE100]).replace(/\s+/g, ' ').trim();
 }
 
