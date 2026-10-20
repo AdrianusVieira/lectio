@@ -1,0 +1,15 @@
+{
+  "units": {
+    "ms": "milissegundos", "s": "segundos", "min": "minutos", "h": "horas",
+    "r/min": "rotações por minuto", "rpm": "rotações por minuto", "Hz": "hertz",
+    "kHz": "quilohertz", "MHz": "megahertz", "V": "volts", "mV": "milivolts",
+    "A": "ampères", "mA": "miliampères", "W": "watts", "kW": "quilowatts",
+    "mm": "milímetros", "cm": "centímetros", "m": "metros", "°C": "graus Celsius"
+  },
+  "symbols": {"τ": "tau", "α": "alfa", "β": "beta", "γ": "gama", "Δ": "delta", "δ": "delta", "θ": "teta", "λ": "lambda", "μ": "mi", "π": "pi", "σ": "sigma", "ω": "ômega", "Ω": "ômega", "≤": "menor ou igual a", "≥": "maior ou igual a", "≈": "aproximadamente", "≠": "diferente de"},
+  "acronyms": {
+    "NR": {"mode": "spell"}, "CLP": {"mode": "expand"}, "IHM": {"mode": "expand"},
+    "A6N": {"mode": "spell"}, "FR01": {"mode": "spell"}, "FR02": {"mode": "spell"},
+    "PANATERM": {"mode": "word"}
+  }
+}
