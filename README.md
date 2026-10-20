@@ -34,7 +34,7 @@ As vozes pt-BR chegam de forma assíncrona. O Lectio prefere vozes Microsoft com
 
 ## Publicação
 
-O workflow de GitHub Pages compila e publica `dist/` a cada push em `main`, após os testes. No GitHub, configure **Settings → Pages → Build and deployment → GitHub Actions**. A URL usa a base `/lectio/` no build do workflow. Publicação depende dessa configuração do repositório.
+O repositório ainda não tem GitHub Pages habilitado. Para publicar futuramente, configure **Settings → Pages → Build and deployment → GitHub Actions** e crie um workflow que execute `GITHUB_PAGES=true npm run build` e publique `dist/`. A base `/lectio/` já está prevista no build do Vite.
 
 ## Limites e próximos passos
 
