@@ -25,7 +25,7 @@ function useVoices() {
 }
 
 function FileTree({ entries, selected, onSelect }: { entries: FileEntry[]; selected?: string; onSelect: (path: string) => void }) {
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const directories = new Set<string>();
   for (const entry of entries) {
     const parts = entry.path.split('/');
@@ -33,11 +33,11 @@ function FileTree({ entries, selected, onSelect }: { entries: FileEntry[]; selec
   }
   const rows = [...directories].map(path => ({ path, directory: true })).concat(entries.map(entry => ({ path: entry.path, directory: false })))
     .sort((a, b) => a.path.localeCompare(b.path, 'pt-BR'));
-  return <div className="file-list" role="tree">{rows.filter(row => !row.path.split('/').slice(0, -1).some((_, i, parts) => collapsed.has(parts.slice(0, i + 1).join('/')))).map(row => {
+  return <div className="file-list" role="tree">{rows.filter(row => !row.path.split('/').slice(0, -1).some((_, i, parts) => !expanded.has(parts.slice(0, i + 1).join('/')))).map(row => {
     const name = row.path.split('/').at(-1);
     const entry = entries.find(e => e.path === row.path);
-    return <button type="button" role="treeitem" aria-selected={selected === row.path} className={`file-row ${selected === row.path ? 'selected' : ''} ${entry?.ignored ? 'muted' : ''}`} style={{ paddingLeft: `${12 + (row.path.split('/').length - 1) * 15}px` }} key={row.path} onClick={() => row.directory ? setCollapsed(previous => { const next = new Set(previous); next.has(row.path) ? next.delete(row.path) : next.add(row.path); return next; }) : !entry?.ignored && onSelect(row.path)}>
-      <span className="file-icon">{row.directory ? collapsed.has(row.path) ? '▸' : '▾' : entry?.kind === 'pdf' ? '▣' : '◇'}</span><span className="truncate">{name}</span>
+    return <button type="button" role="treeitem" aria-selected={selected === row.path} aria-expanded={row.directory ? expanded.has(row.path) : undefined} className={`file-row ${selected === row.path ? 'selected' : ''} ${entry?.ignored ? 'muted' : ''}`} style={{ paddingLeft: `${12 + (row.path.split('/').length - 1) * 15}px` }} key={row.path} onClick={() => row.directory ? setExpanded(previous => { const next = new Set(previous); next.has(row.path) ? next.delete(row.path) : next.add(row.path); return next; }) : !entry?.ignored && onSelect(row.path)}>
+      <span className="file-icon">{row.directory ? expanded.has(row.path) ? '▾' : '▸' : entry?.kind === 'pdf' ? '▣' : '◇'}</span><span className="truncate">{name}</span>
     </button>;
   })}</div>;
 }
@@ -56,6 +56,7 @@ function SentenceView({ doc, index, word, onSeek }: { doc: DocumentData; index: 
 export default function App() {
   const [theme, setTheme] = useState(initialTheme);
   const [entries, setEntries] = useState<FileEntry[]>([]);
+  const [folderLoad, setFolderLoad] = useState(0);
   const [docs, setDocs] = useState<DocumentData[]>([]);
   const [definitions, setDefinitions] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState<string>();
@@ -80,7 +81,7 @@ export default function App() {
   const reader = useRef(new SpeechReader());
   const worker = useRef<Worker | null>(null);
   const voices = useVoices();
-  const natural = voices.find(v => /microsoft/i.test(v.name) && /natural/i.test(v.name));
+  const natural = voices.find(v => /microsoft/i.test(v.name) && /natural/i.test(v.name)) || voices.find(v => /natural/i.test(v.name));
   const voice = voices.find(v => v.name === voiceName) || natural || voices[0];
   const doc = docs.find(d => d.path === selected);
   const selectedFile = entries.find(e => e.path === selected)?.file;
@@ -94,10 +95,9 @@ export default function App() {
   useEffect(() => { reader.current.onPosition = (i, w) => { setPosition(i); setWord(w); setSelected(current => { if (current) localStorage.setItem(positionKey(current), String(i)); return current; }); }; reader.current.onState = () => { setSpeaking(reader.current.speaking); setPaused(reader.current.paused); }; return () => reader.current.stop(); }, []);
   useEffect(() => reader.current.update(settings)); // Current settings apply to next sentence.
   useEffect(() => { if (doc) reader.current.load(doc, settings, Number(localStorage.getItem(positionKey(doc.path)) || 0)); }, [doc?.path]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (!voices.length || voiceName) return; if (natural) setVoiceName(natural.name); else setVoiceName(voices[0].name); }, [voices, natural, voiceName]);
 
   const loadEntries = useCallback((files: FileEntry[]) => {
-    reader.current.stop(); worker.current?.terminate(); setEntries(files); setDocs([]); setSelected(undefined); setError('');
+    reader.current.stop(); worker.current?.terminate(); setEntries(files); setFolderLoad(value => value + 1); setDocs([]); setSelected(undefined); setError('');
     const supported = files.filter(e => e.kind);
     if (!supported.length) { setProgress('Nenhum formato compatível encontrado.'); return; }
     setProgress(`Processando 0/${supported.length} arquivos`);
@@ -133,7 +133,7 @@ export default function App() {
     <div className="workspace">
       <aside className="sidebar"><div className="sidebar-head"><span className="eyebrow">BIBLIOTECA</span><span>{entries.filter(e => e.kind).length} ARQUIVOS</span></div>
         <div className="folder-actions"><button className="primary" onClick={async () => { try { loadEntries(await pickDirectory()); } catch (e) { if (e instanceof Error && e.name !== 'AbortError') fileInput.current?.click(); } }}>＋ Abrir pasta</button><input ref={fileInput} type="file" multiple style={{ display: 'none' }} {...{ webkitdirectory: '' }} onChange={e => { loadEntries([...e.target.files || []].map(file => fileEntry(file, file.webkitRelativePath || file.name))); e.target.value = ''; }} /></div>
-        {entries.length ? <FileTree entries={entries} selected={selected} onSelect={setSelected} /> : <div className="drop-instruction"><span>↳</span>Solte uma pasta aqui ou abra pelo botão acima.<small>PDF · TEX · BIB · MD · TXT</small></div>}
+        {entries.length ? <FileTree key={folderLoad} entries={entries} selected={selected} onSelect={setSelected} /> : <div className="drop-instruction"><span>↳</span>Solte uma pasta aqui ou abra pelo botão acima.<small>PDF · TEX · BIB · MD · TXT</small></div>}
         {ignored.length > 0 && <details className="ignored"><summary>{ignored.length} arquivo(s) ignorado(s)</summary><ul>{ignored.slice(0, 100).map(e => <li key={e.path}>{e.path}</li>)}</ul></details>}
         <div className="sidebar-footer">Os arquivos ficam neste dispositivo. Nenhum documento é enviado pelo Lectio.</div>
       </aside>
@@ -144,7 +144,7 @@ export default function App() {
       </main>
       <aside className="inspector"><div className="tabs"><button className={tab === 'glossary' ? 'active' : ''} onClick={() => setTab('glossary')}>GLOSSÁRIO</button><button className={tab === 'search' ? 'active' : ''} onClick={() => setTab('search')}>BUSCA</button></div>
         {tab === 'glossary' ? <div className="inspector-body"><p className="panel-intro">Siglas e termos encontrados na pasta.</p><input className="search-input" placeholder="Filtrar termos…" value={termQuery} onChange={e => setTermQuery(e.target.value)} /><div className="term-list">{relevantTerms.map(t => <button key={t.term} className={`term-row ${selectedTerm === t.term ? 'active' : ''}`} onClick={() => setSelectedTerm(t.term)}><span>{t.term}</span><span>{t.count}</span></button>)}</div>{term && <div className="term-detail"><h3>{term.term}</h3><p>{term.definition || 'Sem definição detectada'}</p><small>{term.files.length} arquivo(s) · {term.count} ocorrência(s)</small><label>PRONÚNCIA</label><select value={overrides[term.term]?.mode || 'auto'} onChange={e => changeOverride(term.term, { ...overrides[term.term], mode: e.target.value === 'auto' ? undefined : e.target.value as Pronunciation['mode'] })}><option value="auto">Automática</option><option value="spell">Soletrar</option><option value="word">Ler como palavra</option><option value="expand">Expandir na primeira vez</option></select><input placeholder="Ou escreva a pronúncia exata" value={overrides[term.term]?.value || ''} onChange={e => changeOverride(term.term, { ...overrides[term.term], value: e.target.value })} /><div className="contexts">{term.contexts.map((context, i) => <p key={i}>{context}</p>)}</div><small>{term.files.join(' · ')}</small></div>}</div> : <div className="inspector-body"><p className="panel-intro">Busca em todos os documentos, com acentos normalizados.</p><input className="search-input" placeholder="Buscar na pasta…" value={query} onChange={e => setQuery(e.target.value)} /><div className="results">{results.map(result => <button key={result.id} onClick={() => { setSelected(result.id); setQuery(''); }}>{result.path}<span>ABRIR ↗</span></button>)}</div></div>}
-        <div className="settings"><div className="section-title">VOZ <span>PT-BR</span></div><select value={voice?.name || ''} onChange={e => setVoiceName(e.target.value)}>{voices.length ? voices.map(v => <option key={v.name} value={v.name}>{v.name} {v.localService ? '· local' : '· online'}</option>) : <option value="">Aguardando vozes do navegador</option>}</select><div className="range-row"><label>VELOCIDADE <b>{rate.toFixed(1)}×</b></label><input type="range" min="0.5" max="2" step="0.1" value={rate} onChange={e => setRate(+e.target.value)} /></div><div className="range-row"><label>TOM <b>{pitch.toFixed(1)}</b></label><input type="range" min="0.5" max="2" step="0.1" value={pitch} onChange={e => setPitch(+e.target.value)} /></div><p className="voice-notice">{voice?.localService ? 'Esta voz é local.' : 'Vozes online podem enviar o texto ao provedor (Microsoft/Google).'} A síntese usa o navegador.</p><details className="reading-options"><summary>Opções de leitura</summary><label><input type="checkbox" checked={skipReferences} onChange={e => setSkipReferences(e.target.checked)} /> Pular referências</label><label><input type="checkbox" checked={skipNotes} onChange={e => setSkipNotes(e.target.checked)} /> Pular notas</label><label><input type="checkbox" checked={skipCaptions} onChange={e => setSkipCaptions(e.target.checked)} /> Pular legendas</label></details></div>
+        <div className="settings"><div className="section-title">VOZ <span>PT-BR</span></div><select value={voice?.name || ''} onChange={e => setVoiceName(e.target.value)}>{voices.length ? voices.map(v => <option key={v.name} value={v.name}>{v.name} {v.localService ? '· local' : '· online'}</option>) : <option value="">Aguardando vozes do navegador</option>}</select><div className="range-row"><label>VELOCIDADE <b>{rate.toFixed(1)}×</b></label><input type="range" min="0.5" max="2" step="0.1" value={rate} onChange={e => setRate(+e.target.value)} /></div><div className="range-row"><label>TOM <b>{pitch.toFixed(1)}</b></label><input type="range" min="0.5" max="2" step="0.1" value={pitch} onChange={e => setPitch(+e.target.value)} /></div><p className="voice-notice">{voice?.localService ? 'Esta voz é local.' : 'Vozes online podem enviar o texto ao provedor (Microsoft/Google).'} A síntese usa o navegador.{voices.length > 0 && !natural && ' Para ouvir vozes mais naturais, experimente abrir o Lectio no Microsoft Edge ou instalar mais vozes pt-BR no sistema.'}</p><details className="reading-options"><summary>Opções de leitura</summary><label><input type="checkbox" checked={skipReferences} onChange={e => setSkipReferences(e.target.checked)} /> Pular referências</label><label><input type="checkbox" checked={skipNotes} onChange={e => setSkipNotes(e.target.checked)} /> Pular notas</label><label><input type="checkbox" checked={skipCaptions} onChange={e => setSkipCaptions(e.target.checked)} /> Pular legendas</label></details></div>
       </aside>
     </div>
   </div>;
